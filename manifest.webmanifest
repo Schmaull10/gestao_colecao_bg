@@ -1,0 +1,11 @@
+{
+  "name": "Gestão Coleção BG",
+  "short_name": "Coleção BG",
+  "description": "Gestão pessoal de coleção de jogos de tabuleiro",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f6f8",
+  "theme_color": "#17212b",
+  "lang": "pt-PT"
+}

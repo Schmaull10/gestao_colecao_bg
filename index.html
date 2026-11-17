@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Gestão Coleção BG</title>
+  <meta name="theme-color" content="#17212b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Coleção BG">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <aside class="sidebar">
+    <div class="brand"><div class="brandMark">BG</div><div><strong>Gestão Coleção</strong><small>V1.4 · Multi-dispositivo</small></div></div>
+    <nav id="nav">
+      <button data-view="dashboard" class="active">⌂ <span>Início</span></button>
+      <button data-view="collection">▦ <span>Coleção</span></button>
+      <button data-view="purchases">↓ <span>Compras</span></button>
+      <button data-view="sales">↑ <span>Vendas</span></button>
+      <button data-view="movements">↕ <span>Movimentos</span></button>
+      <button data-view="wishlist">♡ <span>Wishlist</span></button>
+      <button data-view="stats">▥ <span>Estatísticas</span></button>
+      <button data-view="settings">⚙ <span>Definições</span></button>
+    </nav>
+    <div class="sidebarFoot">Base privada sincronizada pelo <b>GitHub</b>.<br>PC · telemóvel · tablet.</div>
+  </aside>
+  <main>
+    <header>
+      <div><h1 id="pageTitle">Início</h1><p id="pageSubtitle">Visão geral da tua coleção</p></div>
+      <div class="headerActions"><span id="syncBadge" class="syncBadge off">● a iniciar</span><button class="btn secondary" id="quickBackup">Backup</button><button class="btn primary" id="addItemBtn">+ Adicionar jogo</button></div>
+    </header>
+    <section id="content"></section>
+  </main>
+</div>
+
+<dialog id="itemDialog" class="modal">
+  <form method="dialog" id="itemForm">
+    <div class="modalHead"><div><h2 id="itemDialogTitle">Adicionar jogo</h2><p>Ficha do exemplar</p></div><button class="iconBtn" value="cancel">×</button></div>
+    <div class="formGrid">
+      <label class="span2">Título<input name="title" required></label>
+      <label>Tipo<select name="item_type" id="itemType"><option value="base">Jogo base</option><option value="expansion">Expansão</option></select></label>
+      <label id="baseGameLabel">Jogo base<select name="base_game_id" id="baseGameSelect"><option value="">—</option></select></label>
+      <label>Estado<select name="status"><option>Coleção</option><option>À venda</option><option>Vendido</option><option>Trocado</option></select></label>
+      <label>Estado físico<select name="condition"><option value="">—</option><option>NOVO</option><option>COMO NOVO</option><option>USADO</option><option>INCOMPLETO</option></select></label>
+      <label>Tipo de aquisição<select name="acquisition_type"><option>Compra</option><option>Troca</option><option>Oferta</option><option>Pack</option></select></label>
+      <label>Referência do negócio<input name="deal_ref" placeholder="Ex.: Pack 2026-10"></label>
+      <label>Plataforma de compra<input name="purchase_platform"></label>
+      <label>Custo (€)<input name="purchase_cost" inputmode="decimal"></label>
+      <label>País de compra<input name="purchase_country"></label>
+      <label>Data de compra<input name="purchase_date" type="date"></label>
+      <label>Dependência de idioma<select name="language_dep"><option value="">—</option><option>NÃO</option><option>SIM</option><option>BAIXA</option><option>MODERADA</option><option>ALTA</option></select></label>
+      <label class="span2">Mecanismos<input name="mechanisms" placeholder="Separados por vírgulas"></label>
+      <fieldset class="span2"><legend>Número de jogadores</legend><div class="checks">
+        <label><input type="checkbox" name="players_1"> 1</label><label><input type="checkbox" name="players_2"> 2</label><label><input type="checkbox" name="players_3"> 3</label><label><input type="checkbox" name="players_4"> 4</label><label><input type="checkbox" name="players_5"> 5</label><label><input type="checkbox" name="players_6plus"> 6+</label>
+      </div></fieldset>
+      <div class="formSection span2">BoardGameGeek</div>
+      <label>BGG ID<input name="bgg_id" inputmode="numeric" placeholder="Ex.: 174430"></label>
+      <label>Ano BGG<input name="bgg_year" readonly></label>
+      <label class="span2">Nome no BGG<input name="bgg_name" readonly></label>
+      <div class="span2 bggInlineActions"><button type="button" class="btn secondary" id="itemBggSearch">Procurar no BGG</button><button type="button" class="btn secondary" id="itemBggLoadId">Associar pelo ID</button><button type="button" class="btn bggBtn" id="itemBggOpen">Abrir no BGG</button><button type="button" class="btn secondary" id="itemManageExpansions">Gerir expansões</button></div>
+      <div class="formSection span2">Venda</div>
+      <label>Tipo de saída<select name="sale_type"><option>Venda</option><option>Troca</option><option>Oferta</option></select></label>
+      <label>Plataforma de venda<input name="sale_platform"></label>
+      <label>Preço de venda (€)<input name="sale_price" inputmode="decimal"></label>
+      <label>País de venda<input name="sale_country"></label>
+      <label>Data de venda<input name="sale_date" type="date"></label>
+      <label class="span2">Comentários<textarea name="comments" rows="3"></textarea></label>
+    </div>
+    <div class="modalActions"><button class="btn secondary" value="cancel">Cancelar</button><button type="button" id="saveItem" class="btn primary">Guardar</button></div>
+    <div id="itemDangerZone" class="itemDangerZone" hidden>
+      <div><b>Eliminar item</b><p>Remove permanentemente este registo e os movimentos associados. Usa apenas para itens registados por engano.</p></div>
+      <button type="button" id="deleteItemFromSheet" class="btn danger">Eliminar item</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="sellDialog" class="modal">
+  <form method="dialog" id="sellForm">
+    <div class="modalHead"><div><h2>Registar venda</h2><p id="sellTitle"></p></div><button class="iconBtn" value="cancel">×</button></div>
+    <div class="formGrid">
+      <label id="saleBasePriceLabel">Preço atribuído ao item (€)<input name="sale_price" required inputmode="decimal"></label>
+      <label>Data<input name="sale_date" type="date"></label>
+      <label>Plataforma<input name="sale_platform"></label>
+      <label>País<input name="sale_country"></label>
+      <div id="saleBundleSection" class="span2 saleBundleSection" hidden>
+        <div class="formSection">Expansões incluídas na mesma venda</div>
+        <p class="tiny">Seleciona as expansões vendidas juntamente com o jogo base e atribui um valor a cada uma. Se o preço foi único, podes deixar 0 € nas expansões e colocar o total no jogo base.</p>
+        <div id="saleBundleItems" class="saleBundleItems"></div>
+        <div class="saleBundleTotal"><span>Total registado nesta venda</span><b id="saleBundleTotal">0,00 €</b></div>
+      </div>
+    </div>
+    <div class="modalActions"><button class="btn secondary" value="cancel">Cancelar</button><button type="button" id="confirmSale" class="btn primary">Registar venda</button></div>
+  </form>
+</dialog>
+
+<dialog id="soldDetailDialog" class="modal wideModal">
+  <div class="modalHead"><div><h2 id="soldDetailTitle">Ficha do item vendido</h2><p id="soldDetailSubtitle">Informação preservada no momento da venda</p></div><button class="iconBtn" id="closeSoldDetail">×</button></div>
+  <div id="soldDetailContent" class="soldDetailContent"></div>
+  <div class="modalActions"><button class="btn bggBtn" id="soldDetailBgg">Abrir no BGG</button><button class="btn secondary" id="closeSoldDetail2">Fechar</button></div>
+</dialog>
+
+
+<dialog id="operationDateDialog" class="modal small">
+  <form method="dialog" id="operationDateForm">
+    <div class="modalHead"><div><h2 id="operationDateTitle">Alterar data</h2><p id="operationDateSubtitle"></p></div><button class="iconBtn" value="cancel">×</button></div>
+    <div class="formGrid one">
+      <label id="operationDateLabel">Data<input name="operation_date" type="date" required></label>
+    </div>
+    <div class="modalActions"><button class="btn secondary" value="cancel">Cancelar</button><button type="button" id="saveOperationDate" class="btn primary">Guardar data</button></div>
+  </form>
+</dialog>
+
+<dialog id="wishDialog" class="modal small">
+  <form method="dialog" id="wishForm">
+    <div class="modalHead"><div><h2 id="wishDialogTitle">Adicionar à wishlist</h2><p id="wishDialogSubtitle"></p></div><button class="iconBtn" value="cancel">×</button></div>
+    <div class="formGrid one"><label>Título<input name="title" required></label><label>Prioridade<input name="priority" type="number" step="0.5" min="1" max="10"></label><label>Notas<textarea name="notes" rows="3"></textarea></label></div>
+    <div class="modalActions"><button class="btn secondary" value="cancel">Cancelar</button><button type="button" id="saveWish" class="btn primary">Guardar</button></div>
+  </form>
+</dialog>
+
+<dialog id="rankDialog" class="modal rankModal">
+  <div class="modalHead"><div><h2 id="rankDialogTitle">Qual queres mais?</h2><p id="rankDialogSubtitle"></p></div></div>
+  <div class="rankComparison">
+    <div class="rankChoice" id="rankLeft"></div>
+    <div class="rankVersus">OU</div>
+    <div class="rankChoice" id="rankRight"></div>
+  </div>
+  <div id="rankProgress" class="rankProgress"></div>
+  <div class="modalActions rankActions"><button type="button" id="rankStop" class="btn secondary">Parar por agora</button><button type="button" id="rankTie" class="btn secondary">Não consigo decidir</button></div>
+</dialog>
+
+<dialog id="manualRankDialog" class="modal small">
+  <form method="dialog" id="manualRankForm">
+    <div class="modalHead"><div><h2 id="manualRankTitle">Mover no ranking</h2><p id="manualRankSubtitle"></p></div><button class="iconBtn" value="cancel">×</button></div>
+    <div class="formGrid one"><label>Nova posição no ranking<input name="rank_position" type="number" min="1" step="1" required></label><p class="tiny">Esta alteração é manual e pode ultrapassar as fronteiras de prioridade. O ranking fica exatamente na posição que escolheres.</p></div>
+    <div class="modalActions"><button class="btn secondary" value="cancel">Cancelar</button><button type="button" id="saveManualRank" class="btn primary">Mover</button></div>
+  </form>
+</dialog>
+
+<dialog id="priceDialog" class="modal small">
+  <form method="dialog" id="priceForm">
+    <div class="modalHead"><div><h2>Adicionar preço</h2><p id="priceWishTitle"></p></div><button class="iconBtn" value="cancel">×</button></div>
+    <div class="formGrid one"><label>Preço observado (€)<input name="price" required inputmode="decimal"></label><label>Data<input name="observed_date" type="date"></label></div>
+    <div class="modalActions"><button class="btn secondary" value="cancel">Cancelar</button><button type="button" id="savePrice" class="btn primary">Guardar preço</button></div>
+  </form>
+</dialog>
+
+<dialog id="bggDialog" class="modal">
+  <div class="modalHead"><div><h2>Associar ao BoardGameGeek</h2><p>Pesquisa a base oficial e escolhe o jogo ou expansão correta.</p></div><button class="iconBtn" id="closeBggDialog">×</button></div>
+  <div class="bggSearchBox"><input id="bggQuery" placeholder="Nome do jogo"><button class="btn primary" id="bggSearchBtn">Pesquisar</button></div>
+  <div id="bggStatus" class="bggStatus"></div>
+  <div id="bggResults" class="bggResults"></div>
+  <div class="modalActions"><button class="btn secondary" id="bggRefreshCurrent" style="display:none">Atualizar associação atual</button><button class="btn secondary" id="bggSearchWebsite">Abrir pesquisa no site BGG</button><button class="btn secondary" id="closeBggDialog2">Fechar</button></div>
+</dialog>
+
+<dialog id="expansionDialog" class="modal wideModal">
+  <div class="modalHead"><div><h2>Expansões</h2><p id="expansionBaseTitle"></p></div><button class="iconBtn" id="closeExpansionDialog">×</button></div>
+  <div class="expansionToolbar"><button class="btn primary" id="addExpansionManual">+ Adicionar expansão</button><button class="btn bggBtn" id="discoverBggExpansions">Ver expansões no BGG</button><span class="spacer"></span><span id="expansionCounts" class="tiny"></span></div>
+  <div id="expansionStatus" class="bggStatus"></div>
+  <div id="expansionList" class="expansionList"></div>
+  <div id="bggExpansionResults" class="bggExpansionResults"></div>
+  <div class="modalActions"><button class="btn secondary" id="closeExpansionDialog2">Fechar</button></div>
+</dialog>
+
+<dialog id="addExpansionDialog" class="modal">
+  <form method="dialog" id="expansionForm">
+    <div class="modalHead"><div><h2>Adicionar expansão</h2><p id="addExpansionBaseTitle"></p></div><button class="iconBtn" value="cancel">×</button></div>
+    <div class="formGrid">
+      <label class="span2">Título<input name="title" required></label>
+      <label>Estado<select name="expansion_state"><option value="owned">Tenho</option><option value="wishlist">Wishlist</option><option value="sold">Vendida</option></select></label>
+      <label>BGG ID <span class="tiny">(opcional)</span><input name="bgg_id" inputmode="numeric"></label>
+      <div class="formSection span2">Compra</div>
+      <label>Custo (€)<input name="purchase_cost" inputmode="decimal"></label>
+      <label>Data<input name="purchase_date" type="date"></label>
+      <label>Plataforma<input name="purchase_platform"></label>
+      <label>País<input name="purchase_country"></label>
+      <div class="formSection span2 expansionSaleFields">Venda</div>
+      <label class="expansionSaleFields">Preço de venda (€)<input name="sale_price" inputmode="decimal"></label>
+      <label class="expansionSaleFields">Data de venda<input name="sale_date" type="date"></label>
+      <label class="expansionSaleFields">Plataforma de venda<input name="sale_platform"></label>
+      <label class="expansionSaleFields">País de venda<input name="sale_country"></label>
+      <label class="span2">Comentários<textarea name="comments" rows="3"></textarea></label>
+    </div>
+    <div class="modalActions"><button class="btn secondary" value="cancel">Cancelar</button><button type="button" id="saveExpansion" class="btn primary">Guardar expansão</button></div>
+  </form>
+</dialog>
+
+
+<dialog id="cloudSetupDialog" class="modal small cloudSetupDialog">
+  <div class="modalHead"><div><h2>Ligar aos teus dados</h2><p>O código da app é público; a tua coleção fica no repositório privado.</p></div></div>
+  <div class="cloudSetupBody">
+    <label>GitHub Fine-grained Token<input id="cloudToken" type="password" placeholder="github_pat_…"></label>
+    <p class="tiny">O token fica guardado apenas neste dispositivo e deve ter acesso somente a <b>Schmaull10/gestao_colecao_bg_data</b>.</p>
+    <button class="btn primary" id="cloudSaveToken">Guardar e testar ligação</button>
+    <div id="cloudSetupStatus" class="bggStatus"></div>
+    <div id="cloudImportBox" class="cloudImportBox" hidden><b>Primeira configuração</b><p>Seleciona o <code>data/colecao.json</code> da tua app atual no OneDrive. Será enviado para o repositório privado.</p><button class="btn primary" id="cloudImportBtn">Importar colecao.json atual</button></div>
+  </div>
+  <div class="modalActions"><button class="btn secondary" id="cloudUseLocalBtn">Fechar por agora</button></div>
+</dialog>
+
+<input id="importFile" type="file" accept="application/json,.json" hidden>
+<input id="cloudImportFile" type="file" accept="application/json,.json" hidden>
+<script src="initial_data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
