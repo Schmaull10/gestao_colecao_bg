@@ -11,7 +11,7 @@ const GITHUB_DATA_PATH='colecao.json';
 const GITHUB_BRANCH='main';
 const HELPER='http://127.0.0.1:8766';
 const HOSTED_MODE=location.hostname.endsWith('github.io');
-const APP_VERSION='1.4.4';
+const APP_VERSION='1.4.5';
 const clone=x=>JSON.parse(JSON.stringify(x));
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 let data=loadLocal();
@@ -150,8 +150,11 @@ async function saveGithubData({force=false}={}){
     if(saveQueued){saveQueued=false;setTimeout(()=>persistSharedData().catch(()=>{}),300)}
   }
 }
-function save(){
+function saveLocalOnly(){
   localStorage.setItem(STORAGE,JSON.stringify(data));
+}
+function save(){
+  saveLocalOnly();
   clearTimeout(saveTimer);
   saveTimer=setTimeout(()=>{persistSharedData().catch(()=>{})},1200);
 }
@@ -499,7 +502,7 @@ function startWishPositioning(id,source='single'){
     return;
   }
   data.wishlist_rank_session={item_id:Number(w.id),candidate_ids:candidates.map(Number),low:0,high:candidates.length,source,started_at:new Date().toISOString()};
-  save();showWishRankComparison();
+  saveLocalOnly();showWishRankComparison();
 }
 function currentWishRankOpponent(session){
   const ids=(session.candidate_ids||[]).filter(id=>data.wishlist_ranking.includes(Number(id))&&wishById(id));session.candidate_ids=ids;
@@ -509,7 +512,7 @@ function currentWishRankOpponent(session){
 }
 function showWishRankComparison(){
   const s=data.wishlist_rank_session;if(!s){continueWishlistRanking();return}
-  const w=wishById(s.item_id);if(!w){data.wishlist_rank_session=null;save();return}
+  const w=wishById(s.item_id);if(!w){data.wishlist_rank_session=null;saveLocalOnly();return}
   const opp=currentWishRankOpponent(s);if(!opp){finalizeWishPositioning();return}
   $('#rankDialogTitle').textContent='Qual queres mais?';
   $('#rankDialogSubtitle').textContent=`A posicionar “${w.title}” no ranking global · prioridade ${w.priority??'—'} (apenas referência)`;
@@ -528,7 +531,7 @@ function answerWishRank(choice){
   if(choice==='new'){recordWishComparison(w.id,opp.wish.id,'left',w.id);s.high=opp.mid}
   else if(choice==='existing'){recordWishComparison(w.id,opp.wish.id,'right',opp.wish.id);s.low=opp.mid+1}
   else {recordWishComparison(w.id,opp.wish.id,'tie',null);s.force_after_id=opp.wish.id;s.low=s.high;}
-  save();
+  saveLocalOnly();
   if(s.low>=s.high||s.force_after_id){finalizeWishPositioning();return}
   showWishRankComparison();
 }
@@ -548,7 +551,7 @@ function finalizeWishPositioning(){
   const source=s.source;data.wishlist_rank_session=null;save();if($('#rankDialog').open)$('#rankDialog').close();if(view==='wishlist')wishlist();
   if(source==='build')setTimeout(continueWishlistRanking,80);
 }
-function stopWishRanking(){if($('#rankDialog').open)$('#rankDialog').close();if(view==='wishlist')wishlist()}
+function stopWishRanking(){saveLocalOnly();if($('#rankDialog').open)$('#rankDialog').close();if(view==='wishlist')wishlist()}
 function openManualWishRank(id){
   cleanWishlistRanking();const w=wishById(id);if(!w)return;manualRankWishId=Number(id);const current=wishRankIndex(id);
   $('#manualRankTitle').textContent=`Mover “${w.title}”`;
