@@ -11,7 +11,7 @@ const GITHUB_DATA_PATH='colecao.json';
 const GITHUB_BRANCH='main';
 const HELPER='http://127.0.0.1:8766';
 const HOSTED_MODE=location.hostname.endsWith('github.io');
-const APP_VERSION='1.4.3';
+const APP_VERSION='1.4.4';
 const clone=x=>JSON.parse(JSON.stringify(x));
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 let data=loadLocal();
@@ -90,61 +90,52 @@ async function saveGithubData({force=false}={}){
   if(saveInFlight){saveQueued=true;return}
   saveInFlight=true;
   try{
-    let currentSha=githubSha, previousRaw=null;
-    const cur=await loadGithubData();
-    if(cur.exists){
-      previousRaw=cur.raw;
-      // Se o SHA remoto avançou mas o conteúdo é exatamente a última versão
-      // que este dispositivo sincronizou, trata-se de continuação da nossa
-      // própria fila de gravações (ou de outro separador com o mesmo estado).
-      if(!force&&currentSha&&cur.sha!==currentSha){
-        if(lastSyncedRaw!==null&&cur.raw===lastSyncedRaw){
+    let cur=await loadGithubData();
+    if(cur.exists&&cur.raw===raw){
+      githubSha=cur.sha;
+      lastSyncedRaw=raw;
+      syncState={mode:'sincronizada · GitHub',modified:new Date().toISOString(),path:`${GITHUB_DATA_REPO}/${GITHUB_DATA_PATH}`,error:null,sha:githubSha,localMirror:syncState.localMirror};
+      conflictAlerted=false;
+      localStorage.setItem(STORAGE,raw);updateSyncBadge();mirrorToLocalHelper(raw).catch(()=>{});
+      return;
+    }
+
+    await createDailyGithubBackup(cur.exists?cur.raw:null);
+
+    const doWrite=async(latest)=>{
+      const body={message:`Atualização Gestão Coleção BG · ${new Date().toLocaleString('pt-PT')}`,content:utf8ToB64(raw),branch:GITHUB_BRANCH};
+      if(latest?.exists&&latest.sha)body.sha=latest.sha;
+      return githubApi(`/repos/${GITHUB_OWNER}/${GITHUB_DATA_REPO}/contents/${GITHUB_DATA_PATH}`,{method:'PUT',body});
+    };
+
+    let res=null,lastErr=null;
+    for(let attempt=0;attempt<3;attempt++){
+      try{
+        res=await doWrite(cur);
+        break;
+      }catch(err){
+        lastErr=err;
+        if(err.status!==409&&err.status!==422)throw err;
+        // Outro dispositivo/separador gravou entre a leitura e o PUT.
+        // Relemos o SHA mais recente e repetimos. A versão anterior continua
+        // recuperável no histórico de commits do GitHub.
+        cur=await loadGithubData();
+        if(cur.exists&&cur.raw===raw){
+          res=null;
           githubSha=cur.sha;
-          currentSha=cur.sha;
-        }else if(cur.raw===raw){
-          githubSha=cur.sha;
-          lastSyncedRaw=cur.raw;
-          syncState={mode:'sincronizada · GitHub',modified:new Date().toISOString(),path:`${GITHUB_DATA_REPO}/${GITHUB_DATA_PATH}`,error:null,sha:githubSha,localMirror:syncState.localMirror};
-          conflictAlerted=false;
-          localStorage.setItem(STORAGE,raw);updateSyncBadge();mirrorToLocalHelper(raw).catch(()=>{});
-          return;
-        }else{
-          const err=new Error('Os dados foram alterados noutro dispositivo. Recarrega do GitHub antes de continuar.');
-          err.conflict=true;throw err;
+          break;
         }
-      }else{
-        currentSha=cur.sha;
+        await new Promise(r=>setTimeout(r,250*(attempt+1)));
       }
-    }else{
-      currentSha=null;
     }
+    if(!res&&!githubSha&&lastErr)throw lastErr;
 
-    await createDailyGithubBackup(previousRaw);
-    const body={message:`Atualização Gestão Coleção BG · ${new Date().toLocaleString('pt-PT')}`,content:utf8ToB64(raw),branch:GITHUB_BRANCH};
-    if(currentSha)body.sha=currentSha;
-
-    let res;
-    try{
-      res=await githubApi(`/repos/${GITHUB_OWNER}/${GITHUB_DATA_REPO}/contents/${GITHUB_DATA_PATH}`,{method:'PUT',body});
-    }catch(e){
-      if(e.status===409||e.status===422){
-        // Uma única recuperação automática: volta a ler o ficheiro e só
-        // continua se a versão remota for a nossa última versão conhecida.
-        const latest=await loadGithubData();
-        if(!force&&latest.exists&&lastSyncedRaw!==null&&latest.raw===lastSyncedRaw){
-          body.sha=latest.sha;
-          res=await githubApi(`/repos/${GITHUB_OWNER}/${GITHUB_DATA_REPO}/contents/${GITHUB_DATA_PATH}`,{method:'PUT',body});
-        }else{
-          const er=new Error('Conflito de sincronização: existe uma versão mais recente no GitHub.');
-          er.conflict=true;throw er;
-        }
-      }else throw e;
-    }
-
-    githubSha=res?.content?.sha||null;
-    if(!githubSha){
-      const confirmed=await loadGithubData();
-      githubSha=confirmed.exists?confirmed.sha:null;
+    if(res){
+      githubSha=res?.content?.sha||null;
+      if(!githubSha){
+        const confirmed=await loadGithubData();
+        githubSha=confirmed.exists?confirmed.sha:null;
+      }
     }
     lastSyncedRaw=raw;
     syncState={mode:'sincronizada · GitHub',modified:new Date().toISOString(),path:`${GITHUB_DATA_REPO}/${GITHUB_DATA_PATH}`,error:null,sha:githubSha,localMirror:syncState.localMirror};
@@ -152,11 +143,7 @@ async function saveGithubData({force=false}={}){
     localStorage.setItem(STORAGE,raw);updateSyncBadge();
     mirrorToLocalHelper(raw).catch(()=>{});
   }catch(e){
-    syncState={...syncState,mode:e.conflict?'conflito · não gravado':'erro de sincronização',error:e.message};updateSyncBadge();
-    if(e.conflict&&!conflictAlerted){
-      conflictAlerted=true;
-      alert('Há alterações realmente diferentes no GitHub. As tuas alterações continuam guardadas neste dispositivo, mas não foram enviadas. Vai a Definições para recarregar ou, se tiveres a certeza, forçar a gravação.');
-    }
+    syncState={...syncState,mode:'erro de sincronização',error:e.message};updateSyncBadge();
     throw e;
   }finally{
     saveInFlight=false;
@@ -976,10 +963,56 @@ async function refreshBggWebMetadata(){
   const token=requireToken();if(!token)return;
   const all=[...data.items,...data.wishlist].filter(x=>x.bgg_id&&!x.bgg_image_url),ids=[...new Set(all.map(x=>String(x.bgg_id)))];
   if(!ids.length){alert('Todos os itens associados ao BGG já têm os dados necessários para a versão web.');return}
-  if(!confirm(`Atualizar capas e jogadores de ${ids.length} BGG ID(s) para a versão web?\n\nOs pedidos são feitos em lotes e respeitam o intervalo do BGG. Podes continuar a usar a app enquanto o processo decorre.`))return;
-  const btn=$('#refreshWebBgg');if(btn)btn.disabled=true;let done=0,errors=0;
-  for(let n=0;n<ids.length;n+=20){const batch=ids.slice(n,n+20);if(btn)btn.textContent=`A preparar… ${Math.min(n+20,ids.length)}/${ids.length}`;try{await waitBggClientRate();const url=`https://boardgamegeek.com/xmlapi2/thing?id=${batch.join(',')}&stats=1`;const res=await fetch(url,{headers:{'Authorization':`Bearer ${token}`,'Accept':'application/xml,text/xml;q=0.9,*/*;q=0.8'}});if(!res.ok)throw new Error(`BGG HTTP ${res.status}`);const things=parseThingsXml(await res.text());for(const d of things){for(const target of [...data.items,...data.wishlist].filter(x=>String(x.bgg_id)===String(d.id))){target.bgg_image_url=d.thumbnail||d.image||target.bgg_image_url||null;if(!HOSTED_MODE&&target.bgg_image_url&&!target.cover_path)target.cover_path=target.bgg_image_url;applyBggPlayers(target,d);target.updated_at=new Date().toISOString()}done++}save();}catch(e){errors++}}
-  if(btn){btn.disabled=false;btn.textContent='Restaurar capas na versão web'}render();alert(`Preparação concluída: ${done} BGG ID(s) atualizados${errors?` · ${errors} lote(s) com erro`:''}.`)
+  if(!confirm(`Atualizar capas e jogadores de ${ids.length} BGG ID(s) para a versão web?\n\nA app recolhe os dados em lotes e só sincroniza uma vez no fim.`))return;
+  const btn=$('#refreshWebBgg');if(btn)btn.disabled=true;
+  let done=0,errors=0;
+  const patches=new Map();
+
+  for(let n=0;n<ids.length;n+=20){
+    const batch=ids.slice(n,n+20);
+    if(btn)btn.textContent=`A preparar… ${Math.min(n+20,ids.length)}/${ids.length}`;
+    try{
+      await waitBggClientRate();
+      const url=`https://boardgamegeek.com/xmlapi2/thing?id=${batch.join(',')}&stats=1`;
+      const res=await fetch(url,{headers:{'Authorization':`Bearer ${token}`,'Accept':'application/xml,text/xml;q=0.9,*/*;q=0.8'}});
+      if(!res.ok)throw new Error(`BGG HTTP ${res.status}`);
+      const things=parseThingsXml(await res.text());
+      for(const d of things){
+        patches.set(String(d.id),d);
+        done++;
+      }
+    }catch(e){errors++}
+  }
+
+  try{
+    // Rebaseia os metadados BGG sobre a versão MAIS RECENTE do GitHub,
+    // para não apagar uma alteração feita no telemóvel durante o processo.
+    const latest=await loadGithubData();
+    if(latest.exists&&latest.raw){
+      const parsed=JSON.parse(latest.raw);
+      if(Array.isArray(parsed.items)&&Array.isArray(parsed.wishlist)){
+        data=parsed;normalize();githubSha=latest.sha;lastSyncedRaw=latest.raw;
+      }
+    }
+
+    for(const target of [...data.items,...data.wishlist]){
+      const d=patches.get(String(target.bgg_id||''));
+      if(!d)continue;
+      target.bgg_image_url=d.thumbnail||d.image||target.bgg_image_url||null;
+      if(!HOSTED_MODE&&target.bgg_image_url&&!target.cover_path)target.cover_path=target.bgg_image_url;
+      applyBggPlayers(target,d);
+      target.updated_at=new Date().toISOString();
+    }
+
+    localStorage.setItem(STORAGE,JSON.stringify(data));
+    await saveGithubData();
+    render();
+    alert(`Preparação concluída: ${done} BGG ID(s) atualizados${errors?` · ${errors} lote(s) com erro`:''}.`);
+  }catch(e){
+    alert('Não foi possível concluir a sincronização das capas: '+e.message);
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='Restaurar capas na versão web'}
+  }
 }
 function applyBggPlayers(target,d){
   const min=parseInt(d?.minplayers,10),max=parseInt(d?.maxplayers,10);
