@@ -11,7 +11,7 @@ const GITHUB_DATA_PATH='colecao.json';
 const GITHUB_BRANCH='main';
 const HELPER='http://127.0.0.1:8766';
 const HOSTED_MODE=location.hostname.endsWith('github.io');
-const APP_VERSION='1.4.2';
+const APP_VERSION='1.4.3';
 const clone=x=>JSON.parse(JSON.stringify(x));
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 let data=loadLocal();
@@ -19,7 +19,7 @@ let view='dashboard', editItemId=null, sellItemId=null, editWishId=null, priceWi
 let expansionBaseId=null, manualRankWishId=null;
 let batchRunning=false;
 let syncState={mode:'a iniciar',modified:null,path:GITHUB_DATA_PATH,error:null,sha:null,localMirror:false};
-let saveTimer=null, githubSha=null, saveInFlight=false, saveQueued=false, conflictAlerted=false;
+let saveTimer=null, githubSha=null, lastSyncedRaw=null, saveInFlight=false, saveQueued=false, conflictAlerted=false;
 let deferredInstallPrompt=null, lastBggCall=0;
 
 
@@ -91,21 +91,77 @@ async function saveGithubData({force=false}={}){
   saveInFlight=true;
   try{
     let currentSha=githubSha, previousRaw=null;
-    if(force||!currentSha){const cur=await loadGithubData();if(cur.exists){currentSha=cur.sha;previousRaw=cur.raw}else currentSha=null}
-    else {try{const cur=await loadGithubData();if(cur.exists&&cur.sha===currentSha)previousRaw=cur.raw;else if(cur.exists&&cur.sha!==currentSha&&!force){const err=new Error('Os dados foram alterados noutro dispositivo. Recarrega do GitHub antes de continuar.');err.conflict=true;throw err}}catch(e){if(e.conflict)throw e}}
+    const cur=await loadGithubData();
+    if(cur.exists){
+      previousRaw=cur.raw;
+      // Se o SHA remoto avançou mas o conteúdo é exatamente a última versão
+      // que este dispositivo sincronizou, trata-se de continuação da nossa
+      // própria fila de gravações (ou de outro separador com o mesmo estado).
+      if(!force&&currentSha&&cur.sha!==currentSha){
+        if(lastSyncedRaw!==null&&cur.raw===lastSyncedRaw){
+          githubSha=cur.sha;
+          currentSha=cur.sha;
+        }else if(cur.raw===raw){
+          githubSha=cur.sha;
+          lastSyncedRaw=cur.raw;
+          syncState={mode:'sincronizada · GitHub',modified:new Date().toISOString(),path:`${GITHUB_DATA_REPO}/${GITHUB_DATA_PATH}`,error:null,sha:githubSha,localMirror:syncState.localMirror};
+          conflictAlerted=false;
+          localStorage.setItem(STORAGE,raw);updateSyncBadge();mirrorToLocalHelper(raw).catch(()=>{});
+          return;
+        }else{
+          const err=new Error('Os dados foram alterados noutro dispositivo. Recarrega do GitHub antes de continuar.');
+          err.conflict=true;throw err;
+        }
+      }else{
+        currentSha=cur.sha;
+      }
+    }else{
+      currentSha=null;
+    }
+
     await createDailyGithubBackup(previousRaw);
-    const body={message:`Atualização Gestão Coleção BG · ${new Date().toLocaleString('pt-PT')}`,content:utf8ToB64(raw),branch:GITHUB_BRANCH};if(currentSha)body.sha=currentSha;
+    const body={message:`Atualização Gestão Coleção BG · ${new Date().toLocaleString('pt-PT')}`,content:utf8ToB64(raw),branch:GITHUB_BRANCH};
+    if(currentSha)body.sha=currentSha;
+
     let res;
-    try{res=await githubApi(`/repos/${GITHUB_OWNER}/${GITHUB_DATA_REPO}/contents/${GITHUB_DATA_PATH}`,{method:'PUT',body})}
-    catch(e){if(e.status===409||e.status===422){const er=new Error('Conflito de sincronização: existe uma versão mais recente no GitHub.');er.conflict=true;throw er}throw e}
-    githubSha=res.content?.sha||null;syncState={mode:'sincronizada · GitHub',modified:new Date().toISOString(),path:`${GITHUB_DATA_REPO}/${GITHUB_DATA_PATH}`,error:null,sha:githubSha,localMirror:syncState.localMirror};conflictAlerted=false;
+    try{
+      res=await githubApi(`/repos/${GITHUB_OWNER}/${GITHUB_DATA_REPO}/contents/${GITHUB_DATA_PATH}`,{method:'PUT',body});
+    }catch(e){
+      if(e.status===409||e.status===422){
+        // Uma única recuperação automática: volta a ler o ficheiro e só
+        // continua se a versão remota for a nossa última versão conhecida.
+        const latest=await loadGithubData();
+        if(!force&&latest.exists&&lastSyncedRaw!==null&&latest.raw===lastSyncedRaw){
+          body.sha=latest.sha;
+          res=await githubApi(`/repos/${GITHUB_OWNER}/${GITHUB_DATA_REPO}/contents/${GITHUB_DATA_PATH}`,{method:'PUT',body});
+        }else{
+          const er=new Error('Conflito de sincronização: existe uma versão mais recente no GitHub.');
+          er.conflict=true;throw er;
+        }
+      }else throw e;
+    }
+
+    githubSha=res?.content?.sha||null;
+    if(!githubSha){
+      const confirmed=await loadGithubData();
+      githubSha=confirmed.exists?confirmed.sha:null;
+    }
+    lastSyncedRaw=raw;
+    syncState={mode:'sincronizada · GitHub',modified:new Date().toISOString(),path:`${GITHUB_DATA_REPO}/${GITHUB_DATA_PATH}`,error:null,sha:githubSha,localMirror:syncState.localMirror};
+    conflictAlerted=false;
     localStorage.setItem(STORAGE,raw);updateSyncBadge();
     mirrorToLocalHelper(raw).catch(()=>{});
   }catch(e){
     syncState={...syncState,mode:e.conflict?'conflito · não gravado':'erro de sincronização',error:e.message};updateSyncBadge();
-    if(e.conflict&&!conflictAlerted){conflictAlerted=true;alert('Há alterações mais recentes feitas noutro dispositivo. As tuas alterações continuam guardadas neste dispositivo, mas não foram enviadas para o GitHub. Vai a Definições para recarregar ou forçar a gravação.')}
+    if(e.conflict&&!conflictAlerted){
+      conflictAlerted=true;
+      alert('Há alterações realmente diferentes no GitHub. As tuas alterações continuam guardadas neste dispositivo, mas não foram enviadas. Vai a Definições para recarregar ou, se tiveres a certeza, forçar a gravação.');
+    }
     throw e;
-  }finally{saveInFlight=false;if(saveQueued){saveQueued=false;setTimeout(()=>persistSharedData().catch(()=>{}),300)}}
+  }finally{
+    saveInFlight=false;
+    if(saveQueued){saveQueued=false;setTimeout(()=>persistSharedData().catch(()=>{}),300)}
+  }
 }
 function save(){
   localStorage.setItem(STORAGE,JSON.stringify(data));
@@ -126,7 +182,7 @@ async function initializeSharedData(){
     if(!token){data=loadLocal();normalize();syncState={mode:'configurar GitHub',modified:null,path:`${GITHUB_DATA_REPO}/${GITHUB_DATA_PATH}`,error:null,sha:null,localMirror:false};setTimeout(showCloudSetup,50);return}
     try{
       const r=await loadGithubData();
-      if(r.exists&&r.raw){const parsed=JSON.parse(r.raw);if(!Array.isArray(parsed.items)||!Array.isArray(parsed.wishlist))throw new Error('O colecao.json remoto não contém uma base válida.');data=parsed;normalize();githubSha=r.sha;localStorage.setItem(STORAGE,JSON.stringify(data));syncState={mode:'sincronizada · GitHub',modified:null,path:`${GITHUB_DATA_REPO}/${GITHUB_DATA_PATH}`,error:null,sha:githubSha,localMirror:false};mirrorToLocalHelper(JSON.stringify(data)).catch(()=>{})}
+      if(r.exists&&r.raw){const parsed=JSON.parse(r.raw);if(!Array.isArray(parsed.items)||!Array.isArray(parsed.wishlist))throw new Error('O colecao.json remoto não contém uma base válida.');data=parsed;normalize();githubSha=r.sha;lastSyncedRaw=r.raw;localStorage.setItem(STORAGE,JSON.stringify(data));syncState={mode:'sincronizada · GitHub',modified:null,path:`${GITHUB_DATA_REPO}/${GITHUB_DATA_PATH}`,error:null,sha:githubSha,localMirror:false};mirrorToLocalHelper(JSON.stringify(data)).catch(()=>{})}
       else {data=loadLocal();normalize();syncState={mode:'GitHub ligado · falta importar base',modified:null,path:`${GITHUB_DATA_REPO}/${GITHUB_DATA_PATH}`,error:null,sha:null,localMirror:false};setTimeout(()=>showCloudSetup(true),50)}
     }catch(e){data=loadLocal();normalize();syncState={mode:'erro de ligação GitHub',modified:null,path:`${GITHUB_DATA_REPO}/${GITHUB_DATA_PATH}`,error:e.message,sha:null,localMirror:false};setTimeout(showCloudSetup,50)}
     return;
@@ -141,14 +197,14 @@ async function initializeSharedData(){
 async function reloadSharedData(){
   try{
     if(HOSTED_MODE||getGithubToken()){
-      const r=await loadGithubData();if(!r.exists||!r.raw)throw new Error('Ainda não existe colecao.json no repositório privado.');const parsed=JSON.parse(r.raw);if(!Array.isArray(parsed.items)||!Array.isArray(parsed.wishlist))throw new Error('Base remota inválida.');data=parsed;normalize();githubSha=r.sha;localStorage.setItem(STORAGE,JSON.stringify(data));syncState={mode:'sincronizada · GitHub',modified:null,path:`${GITHUB_DATA_REPO}/${GITHUB_DATA_PATH}`,error:null,sha:githubSha,localMirror:syncState.localMirror};render();updateSyncBadge();mirrorToLocalHelper(JSON.stringify(data)).catch(()=>{});alert('Dados recarregados do GitHub.');return;
+      const r=await loadGithubData();if(!r.exists||!r.raw)throw new Error('Ainda não existe colecao.json no repositório privado.');const parsed=JSON.parse(r.raw);if(!Array.isArray(parsed.items)||!Array.isArray(parsed.wishlist))throw new Error('Base remota inválida.');data=parsed;normalize();githubSha=r.sha;lastSyncedRaw=r.raw;localStorage.setItem(STORAGE,JSON.stringify(data));syncState={mode:'sincronizada · GitHub',modified:null,path:`${GITHUB_DATA_REPO}/${GITHUB_DATA_PATH}`,error:null,sha:githubSha,localMirror:syncState.localMirror};render();updateSyncBadge();mirrorToLocalHelper(JSON.stringify(data)).catch(()=>{});alert('Dados recarregados do GitHub.');return;
     }
     const r=await helperPostLocal('/api/data/load',{});if(!r.exists||!r.raw)throw new Error('Ainda não existe data/colecao.json.');const parsed=JSON.parse(r.raw);if(!Array.isArray(parsed.items)||!Array.isArray(parsed.wishlist))throw new Error('Base partilhada inválida.');data=parsed;normalize();localStorage.setItem(STORAGE,JSON.stringify(data));syncState={mode:'sincronizada · pasta local',modified:r.modified||null,path:r.path||'data/colecao.json',error:null,sha:null,localMirror:true};render();alert('Dados recarregados da pasta sincronizada.');
   }catch(e){alert('Não foi possível recarregar os dados: '+e.message)}
 }
 function updateSyncBadge(){const el=$('#syncBadge');if(!el)return;const ok=String(syncState.mode||'').includes('sincronizada');el.textContent=ok?'● Sync':'● '+(syncState.mode||'offline');el.className='syncBadge '+(ok?'ok':String(syncState.mode).includes('conflito')?'warn':'off')}
 function showCloudSetup(needsImport=false){const d=$('#cloudSetupDialog');if(!d)return;$('#cloudToken').value=getGithubToken();$('#cloudSetupStatus').textContent=needsImport?'Ligação feita. Agora importa o colecao.json atual para iniciar a base partilhada.':(syncState.error||'Cola o token GitHub criado para este repositório privado.');$('#cloudImportBox').hidden=!needsImport;try{d.showModal()}catch(e){}}
-async function testAndSaveGithubToken(){const t=$('#cloudToken').value.trim(),st=$('#cloudSetupStatus');if(!t){st.textContent='Cola primeiro o token.';return}st.textContent='A testar…';try{await githubApi(`/repos/${GITHUB_OWNER}/${GITHUB_DATA_REPO}`,{token:t});localStorage.setItem(GH_TOKEN_STORAGE,t);st.textContent='Token válido. A verificar a base…';const r=await loadGithubData();if(r.exists&&r.raw){const parsed=JSON.parse(r.raw);if(!Array.isArray(parsed.items)||!Array.isArray(parsed.wishlist))throw new Error('colecao.json remoto inválido.');data=parsed;normalize();githubSha=r.sha;localStorage.setItem(STORAGE,JSON.stringify(data));syncState={mode:'sincronizada · GitHub',modified:null,path:`${GITHUB_DATA_REPO}/${GITHUB_DATA_PATH}`,error:null,sha:githubSha,localMirror:false};$('#cloudSetupDialog').close();nav('dashboard');updateSyncBadge()}else{$('#cloudImportBox').hidden=false;st.textContent='Token válido. O repositório ainda não tem colecao.json — importa o ficheiro atual.'}}catch(e){st.textContent='Erro: '+e.message}}
+async function testAndSaveGithubToken(){const t=$('#cloudToken').value.trim(),st=$('#cloudSetupStatus');if(!t){st.textContent='Cola primeiro o token.';return}st.textContent='A testar…';try{await githubApi(`/repos/${GITHUB_OWNER}/${GITHUB_DATA_REPO}`,{token:t});localStorage.setItem(GH_TOKEN_STORAGE,t);st.textContent='Token válido. A verificar a base…';const r=await loadGithubData();if(r.exists&&r.raw){const parsed=JSON.parse(r.raw);if(!Array.isArray(parsed.items)||!Array.isArray(parsed.wishlist))throw new Error('colecao.json remoto inválido.');data=parsed;normalize();githubSha=r.sha;lastSyncedRaw=r.raw;localStorage.setItem(STORAGE,JSON.stringify(data));syncState={mode:'sincronizada · GitHub',modified:null,path:`${GITHUB_DATA_REPO}/${GITHUB_DATA_PATH}`,error:null,sha:githubSha,localMirror:false};$('#cloudSetupDialog').close();nav('dashboard');updateSyncBadge()}else{$('#cloudImportBox').hidden=false;st.textContent='Token válido. O repositório ainda não tem colecao.json — importa o ficheiro atual.'}}catch(e){st.textContent='Erro: '+e.message}}
 async function importBaseToGithub(file){const st=$('#cloudSetupStatus');if(!getGithubToken()){st.textContent='Guarda/testa primeiro o token GitHub.';return}const txt=await file.text();let parsed;try{parsed=JSON.parse(txt);if(!Array.isArray(parsed.items)||!Array.isArray(parsed.wishlist))throw 0}catch(e){st.textContent='O ficheiro selecionado não é uma base válida.';return}if(!confirm(`Importar esta base para o GitHub privado?\n\n${parsed.items.length} exemplares · ${parsed.wishlist.length} itens na wishlist`))return;data=parsed;normalize();githubSha=null;localStorage.setItem(STORAGE,JSON.stringify(data));st.textContent='A enviar para o GitHub…';try{await saveGithubData({force:true});$('#cloudSetupDialog').close();nav('dashboard');alert('Base importada. A partir de agora PC e telemóvel usam o mesmo colecao.json privado.')}catch(e){st.textContent='Erro ao importar: '+e.message}}
 
 function nextId(arr){return arr.length?Math.max(...arr.map(x=>+x.id||0))+1:1}
