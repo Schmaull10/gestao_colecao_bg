@@ -11,7 +11,7 @@ const GITHUB_DATA_PATH='colecao.json';
 const GITHUB_BRANCH='main';
 const HELPER='http://127.0.0.1:8766';
 const HOSTED_MODE=location.hostname.endsWith('github.io');
-const APP_VERSION='1.4.0';
+const APP_VERSION='1.4.1';
 const clone=x=>JSON.parse(JSON.stringify(x));
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 let data=loadLocal();
@@ -63,7 +63,15 @@ function githubContentPath(path=GITHUB_DATA_PATH){return `/repos/${encodeURIComp
 async function loadGithubData(){
   let obj;
   try{obj=await githubApi(githubContentPath())}catch(e){if(e.status===404)return {exists:false};throw e}
-  const raw=b64ToUtf8(obj.content||'');
+  // Em ficheiros maiores, a Contents API pode devolver metadata sem o campo content.
+  // Nesses casos, lemos o conteúdo pelo Git Blob API usando o SHA devolvido.
+  let encoded=String(obj.content||'').replace(/\n/g,'');
+  if(!encoded&&obj.sha){
+    const blob=await githubApi(`/repos/${GITHUB_OWNER}/${GITHUB_DATA_REPO}/git/blobs/${encodeURIComponent(obj.sha)}`);
+    encoded=String(blob.content||'').replace(/\n/g,'');
+  }
+  if(!encoded)throw new Error('O colecao.json existe no GitHub, mas não foi possível ler o conteúdo.');
+  const raw=b64ToUtf8(encoded);
   return {exists:true,raw,sha:obj.sha,modified:null,path:GITHUB_DATA_PATH};
 }
 async function createDailyGithubBackup(previousRaw){
